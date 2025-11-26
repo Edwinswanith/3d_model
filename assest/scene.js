@@ -14,14 +14,26 @@ export function createScene() {
   camera.position.set(10, 10, 10);
   camera.lookAt(0, 0, 0);
 
-  const renderer = new THREE.WebGLRenderer();
+  const renderer = new THREE.WebGLRenderer({ antialias: false }); // Disable antialiasing for performance
   renderer.setSize(gameWindow.offsetWidth, gameWindow.offsetHeight);
   renderer.shadowMap.enabled = true; // Enable shadows
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.BasicShadowMap; // Use faster shadow type
+  
+  // Handle WebGL context loss
+  renderer.domElement.addEventListener('webglcontextlost', (event) => {
+    event.preventDefault();
+    console.warn('WebGL context lost');
+  });
+  
+  renderer.domElement.addEventListener('webglcontextrestored', () => {
+    console.log('WebGL context restored');
+  });
+  
   gameWindow.appendChild(renderer.domElement);
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
+  controls.dampingFactor = 0.1; // Increase damping for smoother performance
 
   // Helper to create window texture
   function createWindowTexture() {
@@ -29,6 +41,13 @@ export function createScene() {
     canvas.width = 32;
     canvas.height = 64;
     const context = canvas.getContext('2d');
+
+    if (!context) {
+      console.error('Failed to get 2D context for window texture');
+      // Return a simple fallback texture
+      const fallbackTexture = new THREE.TextureLoader().load('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==');
+      return fallbackTexture;
+    }
 
     // Base color
     context.fillStyle = '#222';
@@ -46,6 +65,8 @@ export function createScene() {
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.magFilter = THREE.NearestFilter; // Keep pixelated look
+    texture.minFilter = THREE.NearestFilter; // Add min filter for consistency
+    texture.flipY = false; // Prevent texture flipping issues
     return texture;
   }
 
@@ -210,10 +231,58 @@ export function createScene() {
   const windowTexture = createWindowTexture();
   const buildingPositions = []; // Store building positions and sizes
 
-  // Load Logo Texture
-  const logoTexture = new THREE.TextureLoader().load('assest/logo.png');
+  // Load Logo Texture with error handling
+  const textureLoader = new THREE.TextureLoader();
+  
+  // Create a fallback texture first (always valid)
+  const createFallbackTexture = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, 64, 64);
+      ctx.fillStyle = '#888888';
+      ctx.font = '12px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('LOGO', 32, 32);
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    return texture;
+  };
+  
+  // Start with fallback texture (always valid, prevents shader errors)
+  const logoTexture = createFallbackTexture();
+  
+  // Try to load the actual logo texture
+  // If it fails, we already have a valid fallback
+  textureLoader.load(
+    'assest/logo.png',
+    // onLoad callback - replace the texture image
+    (loadedTexture) => {
+      console.log('Logo texture loaded successfully');
+      try {
+        // Safely update the texture
+        if (loadedTexture && loadedTexture.image) {
+          logoTexture.image = loadedTexture.image;
+          logoTexture.needsUpdate = true;
+        }
+      } catch (e) {
+        console.warn('Error updating logo texture:', e);
+      }
+    },
+    // onProgress callback (optional)
+    undefined,
+    // onError callback
+    (error) => {
+      console.warn('Failed to load logo texture, using fallback');
+      // logoTexture already set to fallback, no action needed
+    }
+  );
 
-  for (let i = 0; i < 300; i++) { // Increased building count
+  for (let i = 0; i < 100; i++) { // Reduced building count for performance
     let posX, posZ;
     let attempts = 0;
 
@@ -260,7 +329,7 @@ export function createScene() {
     building.position.y = height / 2;
     building.scale.set(scaleX, height, scaleZ);
 
-    building.castShadow = true; // Cast shadows
+    building.castShadow = false; // Disable shadows for performance
     building.receiveShadow = true; // Receive shadows
 
     scene.add(building);
@@ -271,7 +340,8 @@ export function createScene() {
       const logoMaterial = new THREE.MeshStandardMaterial({
         map: logoTexture,
         transparent: true,
-        side: THREE.DoubleSide
+        side: THREE.DoubleSide,
+        alphaTest: 0.1 // Helps with transparency issues
       });
       const logo = new THREE.Mesh(logoGeometry, logoMaterial);
 
@@ -367,7 +437,7 @@ export function createScene() {
     const tl = createTrafficLight();
     tl.position.set(pos.x - 2, 0, pos.z - 2);
     tl.rotation.y = Math.PI / 4; // Face center
-    tl.castShadow = true;
+    tl.castShadow = false; // Disable shadows for performance
     scene.add(tl);
 
     // Add Zebra Crossings (4 per intersection)
@@ -430,8 +500,8 @@ export function createScene() {
   const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
   directionalLight.position.set(20, 30, 10);
   directionalLight.castShadow = true; // Cast shadows
-  directionalLight.shadow.mapSize.width = 1024;
-  directionalLight.shadow.mapSize.height = 1024;
+  directionalLight.shadow.mapSize.width = 512; // Reduced from 1024 for performance
+  directionalLight.shadow.mapSize.height = 512; // Reduced from 1024 for performance
   directionalLight.shadow.camera.near = 0.5;
   directionalLight.shadow.camera.far = 100;
   directionalLight.shadow.camera.left = -50;
@@ -449,7 +519,7 @@ export function createScene() {
     const poleMaterial = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.6, roughness: 0.4 });
     const pole = new THREE.Mesh(poleGeometry, poleMaterial);
     pole.position.y = 1.75;
-    pole.castShadow = true;
+    pole.castShadow = false; // Disable shadows for performance
     lamp.add(pole);
 
     // Lamp head
@@ -465,16 +535,17 @@ export function createScene() {
     lampHead.position.y = 3.6;
     lamp.add(lampHead);
 
-    // Point light for illumination
-    const light = new THREE.PointLight(0xfff8dc, 0.5, 8);
+    // Point light for illumination (reduced intensity for performance)
+    const light = new THREE.PointLight(0xfff8dc, 0.3, 6); // Reduced intensity and range
     light.position.y = 3.6;
+    light.castShadow = false; // Disable shadow casting for point lights
     lamp.add(light);
 
     return lamp;
   }
 
-  // Place street lamps along roads at intersections and intervals
-  const lampInterval = 15;
+  // Place street lamps along roads at intersections and intervals (reduced for performance)
+  const lampInterval = 30; // Increased interval to reduce lamp count
   for (let i = -roadRange; i <= roadRange; i += lampInterval) {
     if (Math.abs(i) < 20) continue; // Skip park
 
@@ -502,7 +573,7 @@ export function createScene() {
     });
     const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
     body.position.y = 0.4;
-    body.castShadow = true;
+    body.castShadow = false; // Disable shadows for performance
     car.add(body);
 
     // Car roof/cabin
@@ -515,7 +586,7 @@ export function createScene() {
     const roof = new THREE.Mesh(roofGeometry, roofMaterial);
     roof.position.y = 0.85;
     roof.position.x = -0.2;
-    roof.castShadow = true;
+    roof.castShadow = false; // Disable shadows for performance
     car.add(roof);
 
     // Windows (transparent)
@@ -578,7 +649,7 @@ export function createScene() {
       // Tire - Rotate X 90 to align cylinder with Z axis
       const tire = new THREE.Mesh(wheelGeometry, tireMaterial);
       tire.rotation.x = Math.PI / 2;
-      tire.castShadow = true;
+      tire.castShadow = false; // Disable shadows for performance
       wheel.add(tire);
 
       // Rim
@@ -678,7 +749,7 @@ export function createScene() {
     // Rotate tire X 90 to align with Z
     const frontTire = new THREE.Mesh(wheelGeometry, wheelMaterial);
     frontTire.rotation.x = Math.PI / 2;
-    frontTire.castShadow = true;
+    frontTire.castShadow = false; // Disable shadows for performance
     frontWheel.add(frontTire);
 
     // Front wheel spokes
@@ -697,7 +768,7 @@ export function createScene() {
     const backWheel = new THREE.Group();
     const backTire = new THREE.Mesh(wheelGeometry, wheelMaterial);
     backTire.rotation.x = Math.PI / 2;
-    backTire.castShadow = true;
+    backTire.castShadow = false; // Disable shadows for performance
     backWheel.add(backTire);
 
     // Back wheel spokes
@@ -724,7 +795,7 @@ export function createScene() {
     const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
     body.position.set(-0.15, 0.75, 0); // Adjusted position to sit properly
     body.rotation.z = -0.3; // Less lean
-    body.castShadow = true;
+    body.castShadow = false; // Disable shadows for performance
     cyclist.add(body);
 
     // Cyclist Head
@@ -732,7 +803,7 @@ export function createScene() {
     const skinMaterial = new THREE.MeshStandardMaterial({ color: 0xffdbac });
     const head = new THREE.Mesh(headGeometry, skinMaterial);
     head.position.set(0, 0.3, 0);
-    head.castShadow = true;
+    head.castShadow = false; // Disable shadows for performance
     body.add(head);
 
     // Helmet
@@ -740,7 +811,7 @@ export function createScene() {
     const helmetMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
     const helmet = new THREE.Mesh(helmetGeometry, helmetMaterial);
     helmet.position.copy(head.position);
-    helmet.castShadow = true;
+    helmet.castShadow = false; // Disable shadows for performance
     body.add(helmet);
 
     // Arms - Adjusted position to reach handlebars
@@ -754,12 +825,12 @@ export function createScene() {
     body.add(leftArmPivot);
 
     const leftArm = new THREE.Mesh(armGeometry, bodyMaterial);
-    leftArm.castShadow = true;
+    leftArm.castShadow = false; // Disable shadows for performance
     leftArmPivot.add(leftArm);
 
     const leftHand = new THREE.Mesh(handGeometry, skinMaterial);
     leftHand.position.y = -0.38;
-    leftHand.castShadow = true;
+    leftHand.castShadow = false; // Disable shadows for performance
     leftArmPivot.add(leftHand);
 
     const rightArmPivot = new THREE.Group();
@@ -768,12 +839,12 @@ export function createScene() {
     body.add(rightArmPivot);
 
     const rightArm = new THREE.Mesh(armGeometry, bodyMaterial);
-    rightArm.castShadow = true;
+    rightArm.castShadow = false; // Disable shadows for performance
     rightArmPivot.add(rightArm);
 
     const rightHand = new THREE.Mesh(handGeometry, skinMaterial);
     rightHand.position.y = -0.38;
-    rightHand.castShadow = true;
+    rightHand.castShadow = false; // Disable shadows for performance
     rightArmPivot.add(rightHand);
 
     // Legs (Upper)
@@ -786,7 +857,7 @@ export function createScene() {
     body.add(leftThigh);
 
     const leftThighMesh = new THREE.Mesh(legGeometry, pantsMaterial);
-    leftThighMesh.castShadow = true;
+    leftThighMesh.castShadow = false; // Disable shadows for performance
     leftThigh.add(leftThighMesh);
 
     const rightThigh = new THREE.Group();
@@ -794,7 +865,7 @@ export function createScene() {
     body.add(rightThigh);
 
     const rightThighMesh = new THREE.Mesh(legGeometry, pantsMaterial);
-    rightThighMesh.castShadow = true;
+    rightThighMesh.castShadow = false; // Disable shadows for performance
     rightThigh.add(rightThighMesh);
 
     // Legs (Lower)
@@ -902,7 +973,7 @@ export function createScene() {
   const foliageGeometry = new THREE.SphereGeometry(0.8, 8, 8);
   const foliageMaterial = new THREE.MeshStandardMaterial({ color: 0x228B22 }); // Green foliage
 
-  for (let i = 0; i < 300; i++) { // Increased tree count
+  for (let i = 0; i < 80; i++) { // Reduced tree count for performance
     let posX, posZ;
     let attempts = 0;
 
@@ -924,13 +995,13 @@ export function createScene() {
     // Trunk
     const trunk = new THREE.Mesh(treeGeometry, treeMaterial);
     trunk.position.y = 1;
-    trunk.castShadow = true;
+    trunk.castShadow = false; // Disable shadows for performance
     tree.add(trunk);
 
     // Foliage
     const foliage = new THREE.Mesh(foliageGeometry, foliageMaterial);
     foliage.position.y = 2.2;
-    foliage.castShadow = true;
+    foliage.castShadow = false; // Disable shadows for performance
     tree.add(foliage);
 
     tree.position.set(posX, 0, posZ);
@@ -941,7 +1012,7 @@ export function createScene() {
   const bushGeometry = new THREE.SphereGeometry(0.3, 6, 6);
   const bushMaterial = new THREE.MeshStandardMaterial({ color: 0x32CD32 }); // Lime green
 
-  for (let i = 0; i < 500; i++) { // Increased bush count
+  for (let i = 0; i < 150; i++) { // Reduced bush count for performance
     let posX, posZ;
     let attempts = 0;
 
@@ -960,7 +1031,7 @@ export function createScene() {
     const bush = new THREE.Mesh(bushGeometry, bushMaterial);
     bush.position.set(posX, 0.15, posZ);
     bush.scale.set(0.8 + Math.random() * 0.4, 0.6 + Math.random() * 0.3, 0.8 + Math.random() * 0.4);
-    bush.castShadow = true;
+    bush.castShadow = false; // Disable shadows for performance
     scene.add(bush);
   }
 
@@ -1004,7 +1075,7 @@ export function createScene() {
       const bench = new THREE.Group();
       const seat = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.08, 0.35), new THREE.MeshStandardMaterial({ color: 0x8b5a2b }));
       seat.position.y = 0.35;
-      seat.castShadow = true;
+      seat.castShadow = false; // Disable shadows for performance
       bench.add(seat);
 
       const legs = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.35, 0.08), new THREE.MeshStandardMaterial({ color: 0x4a2f1b }));
@@ -1025,8 +1096,8 @@ export function createScene() {
     addBench(-10, 10);
     addBench(10, 10);
 
-    // Park trees
-    for (let i = 0; i < 32; i++) {
+    // Park trees (reduced for performance)
+    for (let i = 0; i < 15; i++) {
       const px = (Math.random() - 0.5) * (parkSize.w - 2);
       const pz = (Math.random() - 0.5) * (parkSize.h - 2);
 
@@ -1036,11 +1107,11 @@ export function createScene() {
       const tree = new THREE.Group();
       const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.2, 1.2, 8), treeMaterial);
       trunk.position.y = 0.6;
-      trunk.castShadow = true;
+      trunk.castShadow = false; // Disable shadows for performance
       tree.add(trunk);
       const crown = new THREE.Mesh(new THREE.SphereGeometry(0.6, 10, 10), foliageMaterial);
       crown.position.y = 1.4;
-      crown.castShadow = true;
+      crown.castShadow = false; // Disable shadows for performance
       tree.add(crown);
       tree.position.set(px, 0, pz);
       park.add(tree);
@@ -1049,7 +1120,7 @@ export function createScene() {
     // Small mountain
     const mountain = new THREE.Mesh(new THREE.ConeGeometry(3, 2.2, 10), new THREE.MeshStandardMaterial({ color: 0x6a5a48, roughness: 0.95 }));
     mountain.position.set(-6, 1.1, 6);
-    mountain.castShadow = true;
+    mountain.castShadow = false; // Disable shadows for performance
     park.add(mountain);
 
     // Rocks
@@ -1065,7 +1136,7 @@ export function createScene() {
         placed = true;
       }
       if (placed) {
-        rock.castShadow = true;
+        rock.castShadow = false; // Disable shadows for performance
         park.add(rock);
       }
     }
@@ -1080,7 +1151,7 @@ export function createScene() {
       const bush = new THREE.Mesh(parkBushGeometry, parkBushMaterial);
       bush.position.set(bx, 0.2, bz);
       bush.scale.setScalar(0.8 + Math.random() * 0.5);
-      bush.castShadow = true;
+      bush.castShadow = false; // Disable shadows for performance
       park.add(bush);
     }
 
@@ -1147,8 +1218,8 @@ export function createScene() {
     // Tiered seating (realistic benches layer by layer)
     const seatMaterial = new THREE.MeshStandardMaterial({ color: 0x4a90e2, roughness: 0.7 });
     const seatBackMaterial = new THREE.MeshStandardMaterial({ color: 0x2a5a8a, roughness: 0.7 });
-    const tierCount = 8; // Number of tiers
-    const seatsPerTier = 24; // Seats around the stadium
+    const tierCount = 4; // Reduced tiers for performance
+    const seatsPerTier = 16; // Reduced seats for performance
 
     for (let tier = 0; tier < tierCount; tier++) {
       const tierRadius = 6 + tier * 0.8;
@@ -1164,8 +1235,8 @@ export function createScene() {
         const seatMesh = new THREE.Mesh(seatGeometry, seatMaterial);
         seatMesh.position.set(seatX, tierHeight, seatZ);
         seatMesh.rotation.y = angle + Math.PI / 2;
-        seatMesh.castShadow = true;
-        seatMesh.receiveShadow = true;
+        seatMesh.castShadow = false; // Disable shadows for performance
+        seatMesh.receiveShadow = false; // Disable shadows for performance
         stadium.add(seatMesh);
 
         // Seat back
@@ -1174,7 +1245,7 @@ export function createScene() {
         backMesh.position.set(seatX, tierHeight + 0.15, seatZ);
         backMesh.rotation.y = angle + Math.PI / 2;
         backMesh.rotation.x = -0.2;
-        backMesh.castShadow = true;
+        backMesh.castShadow = false; // Disable shadows for performance
         stadium.add(backMesh);
       }
     }
@@ -1186,7 +1257,7 @@ export function createScene() {
       const lz = Math.sin(angle) * 5;
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3, 8), new THREE.MeshStandardMaterial({ color: 0x222 }));
       pole.position.set(lx, 1.5, lz);
-      pole.castShadow = true;
+      pole.castShadow = false; // Disable shadows for performance
       const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.2, 0.4), new THREE.MeshStandardMaterial({ color: 0xf5f1c3, emissive: 0xf5f1c3, emissiveIntensity: 0.2 }));
       lamp.position.y = 1.6;
       pole.add(lamp);
@@ -1205,7 +1276,7 @@ export function createScene() {
   const birdGeometry = new THREE.ConeGeometry(0.1, 0.3, 8); // Smaller birds for scale
   const birdMaterial = new THREE.MeshStandardMaterial({ color: 0xffaa00 });
 
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 15; i++) { // Reduced bird count for performance
     const bird = new THREE.Mesh(birdGeometry, birdMaterial);
 
     const angle = Math.random() * Math.PI * 2;
@@ -1244,12 +1315,12 @@ export function createScene() {
 
     const leftLeg = new THREE.Mesh(legGeometry, legMaterial);
     leftLeg.position.set(-0.07, 0.225, 0);
-    leftLeg.castShadow = true;
+    leftLeg.castShadow = false; // Disable shadows for performance
     person.add(leftLeg);
 
     const rightLeg = new THREE.Mesh(legGeometry, legMaterial);
     rightLeg.position.set(0.07, 0.225, 0);
-    rightLeg.castShadow = true;
+    rightLeg.castShadow = false; // Disable shadows for performance
     person.add(rightLeg);
 
     // Torso (upper body)
@@ -1257,7 +1328,7 @@ export function createScene() {
     const torsoMaterial = new THREE.MeshStandardMaterial({ color: shirtColor });
     const torso = new THREE.Mesh(torsoGeometry, torsoMaterial);
     torso.position.y = 0.7;
-    torso.castShadow = true;
+    torso.castShadow = false; // Disable shadows for performance
     person.add(torso);
 
     // Arms
@@ -1273,12 +1344,12 @@ export function createScene() {
     person.add(leftArm); // Attach to person group, not torso, to avoid scaling issues if torso is scaled
 
     const leftArmMesh = new THREE.Mesh(armGeometry, armMaterial);
-    leftArmMesh.castShadow = true;
+    leftArmMesh.castShadow = false; // Disable shadows for performance
     leftArm.add(leftArmMesh);
 
     const leftHand = new THREE.Mesh(handGeometry, skinMaterial);
     leftHand.position.y = -0.4;
-    leftHand.castShadow = true;
+    leftHand.castShadow = false; // Disable shadows for performance
     leftArm.add(leftHand);
 
     const rightArm = new THREE.Group();
@@ -1287,26 +1358,26 @@ export function createScene() {
     person.add(rightArm);
 
     const rightArmMesh = new THREE.Mesh(armGeometry, armMaterial);
-    rightArmMesh.castShadow = true;
+    rightArmMesh.castShadow = false; // Disable shadows for performance
     rightArm.add(rightArmMesh);
 
     const rightHand = new THREE.Mesh(handGeometry, skinMaterial);
     rightHand.position.y = -0.4;
-    rightHand.castShadow = true;
+    rightHand.castShadow = false; // Disable shadows for performance
     rightArm.add(rightHand);
 
     // Neck
     const neckGeometry = new THREE.CylinderGeometry(0.05, 0.05, 0.08, 6);
     const neck = new THREE.Mesh(neckGeometry, skinMaterial);
     neck.position.y = 0.99;
-    neck.castShadow = true;
+    neck.castShadow = false; // Disable shadows for performance
     person.add(neck);
 
     // Head
     const headGeometry = new THREE.SphereGeometry(0.12, 12, 12);
     const head = new THREE.Mesh(headGeometry, skinMaterial);
     head.position.y = 1.12;
-    head.castShadow = true;
+    head.castShadow = false; // Disable shadows for performance
     person.add(head);
 
     // Hair
@@ -1317,7 +1388,7 @@ export function createScene() {
     const hair = new THREE.Mesh(hairGeometry, hairMaterial);
     hair.position.y = 1.17;
     hair.scale.set(1, 0.8, 1);
-    hair.castShadow = true;
+    hair.castShadow = false; // Disable shadows for performance
     person.add(hair);
 
     // Eyes
@@ -1348,7 +1419,7 @@ export function createScene() {
     sidewalkPositions.push(i);
   }
 
-  for (let i = 0; i < 60; i++) { // Increased pedestrian count
+  for (let i = 0; i < 20; i++) { // Reduced pedestrian count for performance
     const person = createPerson();
 
     // Random sidewalk position
@@ -1383,6 +1454,13 @@ export function createScene() {
   }
 
   function draw() {
+    // Check if WebGL context is lost
+    if (renderer.getContext().isContextLost()) {
+      console.warn('WebGL context is lost, stopping animation');
+      stop();
+      return;
+    }
+
     controls.update();
 
     // Animate all cars
