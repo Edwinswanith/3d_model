@@ -1,0 +1,13 @@
+html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+}
+
+#render-target {
+    height: 100%;
+}
+
+.root-window {
+    height: 100%;
+}
